@@ -19,6 +19,10 @@ pub(crate) struct TonicGenerator {
     pub(crate) client_attributes: Attributes,
     pub(crate) emit_package: bool,
     pub(crate) insert_include: bool,
+    /// Codec type path used in generated server/client method bodies.
+    /// Defaults to `tonic_prost::ProstCodec`; set to a validating codec to enable
+    /// automatic protovalidate enforcement on every decoded request.
+    pub(crate) codec_path: String,
 }
 
 impl Generator for TonicGenerator {
@@ -61,7 +65,8 @@ impl tonic_build::Service for ProstService {
 }
 
 /// A new type wrapper for a prost [`Method`] that implements [`tonic_build::Method`].
-struct ProstMethod(Method);
+/// The second field carries the codec type path used in the generated method body.
+struct ProstMethod(Method, String);
 
 impl tonic_build::Method for ProstMethod {
     type Comment = String;
@@ -75,7 +80,7 @@ impl tonic_build::Method for ProstMethod {
     }
 
     fn codec_path(&self) -> &str {
-        "tonic_prost::ProstCodec"
+        &self.1
     }
 
     fn client_streaming(&self) -> bool {
@@ -142,9 +147,10 @@ impl TonicGenerator {
                         self.prepare_service(module, file, descriptor, service_index)
                     })
                     .flat_map(|mut service| {
+                        let codec_path = self.codec_path.clone();
                         let methods = std::mem::take(&mut service.methods)
                             .into_iter()
-                            .map(ProstMethod)
+                            .map(|m| ProstMethod(m, codec_path.clone()))
                             .collect();
                         let service = ProstService(service, methods);
                         let client = self.generate_client.then(|| {

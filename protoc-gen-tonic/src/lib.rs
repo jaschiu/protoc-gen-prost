@@ -36,6 +36,9 @@ pub fn execute(raw_request: &[u8]) -> protoc_gen_prost::Result {
         client_attributes: params.client_attributes,
         emit_package: !params.disable_package_emission,
         insert_include: !params.no_include,
+        codec_path: params
+            .validate_codec_path
+            .unwrap_or_else(|| "tonic_prost::ProstCodec".to_string()),
     };
 
     let files = generator.generate(&module_request_set)?;
@@ -59,6 +62,9 @@ struct Parameters {
     no_transport: bool,
     no_include: bool,
     flat_output_dir: bool,
+    /// When set, replaces the default `tonic_prost::ProstCodec` with the given codec type.
+    /// Bare `validate` uses the default validating codec path; `validate=<path>` overrides it.
+    validate_codec_path: Option<String>,
 }
 
 impl str::FromStr for Parameters {
@@ -180,6 +186,31 @@ impl str::FromStr for Parameters {
                     param: "flat_output_dir",
                     value: "false",
                 } => (),
+                // `validate` replaces ProstCodec with a codec that runs protovalidate after decode.
+                // Bare `validate` uses the default validating codec; `validate=<path>` uses a
+                // custom path. Unlike other boolean opts, `validate` is always path-valued:
+                // `validate=true` and `validate=false` are rejected as invalid.
+                Param::Parameter { param: "validate" } => {
+                    ret_val.validate_codec_path =
+                        Some("::grpc_validate::ValidatingProstCodec".to_string());
+                }
+                Param::Value {
+                    param: "validate",
+                    value: "true" | "false",
+                } => {
+                    return Err(InvalidParameter::new(
+                        "'validate' is a path-valued option, not a boolean; use bare `validate` \
+                         for the default codec path or `validate=<::path::to::Codec>` for a \
+                         custom one"
+                            .to_string(),
+                    ));
+                }
+                Param::Value {
+                    param: "validate",
+                    value: codec_path,
+                } => {
+                    ret_val.validate_codec_path = Some(codec_path.to_string());
+                }
                 _ => return Err(InvalidParameter::from(param)),
             }
         }
